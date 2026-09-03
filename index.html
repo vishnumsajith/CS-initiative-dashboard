@@ -1,137 +1,651 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CS Initiative Dashboard</title>
+// --- CONFIGURATION ---
+const CONFIG = {
+    // Added September as requested
+    requiredSheets: ['Raw', 'Lot Issue - Moved', 'Shuttle Issue', 'Cancellation - Cross sell', 'Prebooking - Cross sell', 'Edit Extend'],
+    interactionTypes: ['Call', 'Chat', 'Email'],
+    months: ['Jan 2026', 'Feb 2026', 'Mar 2026', 'Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026', 'Sep 2026'],
     
-    <!-- External Libraries (CDNs) -->
-    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    // Projecting for Sept, Oct, Nov based on previous months
+    projectionFactors: {
+        'Sep 2026': 1.02, // Slight increase
+        'Oct 2026': 1.05, // Halloween/Seasonality
+        'Nov 2026': 1.15  // Thanksgiving Peak
+    },
+    verticalMap: {
+        'Parking': {
+            'Airport': 'Airport Parking',
+            'City': 'City Parking'
+        },
+        'General': 'Airport Parking'
+    }
+};
 
-    <!-- Link to your CSS file -->
-    <link rel="stylesheet" href="assets/css/styles.css">
-</head>
-<body>
+// --- STATE MANAGEMENT ---
+let state = {
+    raw: [],
+    initiatives: {
+        overview: [],
+        prebooking: [],
+        cancellations: [],
+        lotIssues: [],
+        shuttleIssues: [],
+        editExtend: []
+    },
+    normalized: {
+        ticketMap: new Map(), 
+        months: []
+    },
+    currentTab: 'overview',
+    charts: {} 
+};
 
-    <!-- Loading Overlay -->
-    <div class="loading-overlay" id="loadingOverlay">
-        <div class="spinner"></div>
-        <div id="loadingText">Processing Data...</div>
-    </div>
+// --- FILE HANDLING ---
+function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
 
-    <!-- Error Toast -->
-    <div class="error-container" id="errorToast"></div>
-
-    <header>
-        <div class="logo-area">
-            <h1>CS Initiative Dashboard</h1>
-            <span id="dataStatus">Waiting for data...</span>
-        </div>
-        <div class="controls-area">
-            <button class="btn btn-outline" onclick="document.getElementById('fileInput').click()">
-                ↻ Upload Excel
-            </button>
-            <input type="file" id="fileInput" accept=".xlsx, .xls" onchange="handleFileUpload(event)">
-        </div>
-    </header>
-
-    <nav>
-        <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('overview')">Overview</button>
-            <button class="tab-btn" onclick="switchTab('prebooking')">Prebooking</button>
-            <button class="tab-btn" onclick="switchTab('cancellations')">Cancellations</button>
-            <button class="tab-btn" onclick="switchTab('lotIssues')">Lot Issues</button>
-            <button class="tab-btn" onclick="switchTab('shuttleIssues')">Shuttle Issues</button>
-            <button class="tab-btn" onclick="switchTab('editExtend')">Edit / Extend</button>
-        </div>
-    </nav>
-
-    <main>
-        <!-- Filters -->
-        <div class="filter-bar">
-            <div class="filter-group">
-                <label for="monthFilter">Month</label>
-                <select id="monthFilter" onchange="updateDashboard()">
-                    <option value="All">All Months</option>
-                    <option value="Jan 2026">Jan 2026</option>
-                    <option value="Feb 2026">Feb 2026</option>
-                    <option value="Mar 2026">Mar 2026</option>
-                    <option value="Apr 2026">Apr 2026</option>
-                    <option value="May 2026">May 2026</option>
-                    <option value="Jun 2026">Jun 2026</option>
-                    <option value="Jul 2026">Jul 2026</option>
-                    <option value="Aug 2026">Aug 2026</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <label for="verticalFilter">Vertical</label>
-                <select id="verticalFilter" onchange="updateDashboard()">
-                    <option value="All">All</option>
-                    <option value="Airport Parking">Airport Parking</option>
-                    <option value="City Parking">City Parking</option>
-                </select>
-            </div>
-            <div class="last-updated" id="lastUpdated">Last Updated: Never</div>
-        </div>
-
-        <!-- OVERVIEW TAB -->
-        <section id="overview" class="dashboard-section active">
-            <div class="kpi-grid" id="overview-kpis">
-                <!-- KPIs injected by JS -->
-            </div>
+    showLoading(true);
+    const reader = new FileReader();
+    
+    reader.onload = async function(e) { // Added async to allow chunking
+        try {
+            const data = new Uint8Array(e.target.result);
             
-            <div class="content-grid">
-                <div class="card">
-                    <h3>Monthly Trends: Tickets vs Interactions</h3>
-                    <div class="chart-container">
-                        <canvas id="overviewChart"></canvas>
-                    </div>
-                </div>
-                <div class="card">
-                    <h3>AI Insights</h3>
-                    <div id="overview-insights"></div>
-                    <h3 style="margin-top:1.5rem;">Oct/Nov Projections</h3>
-                    <div id="overview-projections"></div>
-                </div>
-            </div>
-        </section>
-
-        <!-- INITIATIVE TAB TEMPLATE -->
-        <section id="initiative-container" class="dashboard-section">
-            <div class="kpi-grid" id="initiative-kpis"></div>
+            // Read workbook
+            const workbook = XLSX.read(data, { type: 'array', cellDates: true });
             
-            <div class="content-grid">
-                <div class="card">
-                    <h3>Monthly Performance & Projections</h3>
-                    <div class="chart-container">
-                        <canvas id="initiativeChart"></canvas>
-                    </div>
-                </div>
-                <div class="card">
-                    <h3>Top 5 Parking Lots</h3>
-                    <div id="top-lots-table"></div>
-                </div>
+            if (validateWorkbook(workbook)) {
+                // Use await here because processData is now async
+                await processData(workbook);
+                
+                document.getElementById('lastUpdated').innerText = `Last Updated: ${new Date().toLocaleTimeString()}`;
+                document.getElementById('dataStatus').innerText = "Data Loaded Successfully";
+                showToast("Data processed successfully!", "success");
+            }
+        } catch (err) {
+            console.error(err);
+            showError("We couldn't process this workbook. " + err.message);
+        } finally {
+            showLoading(false);
+            event.target.value = '';
+        }
+    };
+    
+    reader.readAsArrayBuffer(file);
+}
+
+function validateWorkbook(workbook) {
+    const missing = CONFIG.requiredSheets.filter(s => !workbook.SheetNames.includes(s));
+    if (missing.length > 0) {
+        throw new Error(`The uploaded workbook is missing the following sheet(s): ${missing.join(', ')}`);
+    }
+    return true;
+}
+
+// --- DATA PROCESSING CORE ---
+async function processData(workbook) {
+    // 1. Parse Sheets to JSON
+    state.raw = XLSX.utils.sheet_to_json(workbook.Sheets['Raw'], { defval: "" });
+    state.initiatives.prebooking = XLSX.utils.sheet_to_json(workbook.Sheets['Prebooking - Cross sell'], { defval: "" });
+    state.initiatives.cancellations = XLSX.utils.sheet_to_json(workbook.Sheets['Cancellation - Cross sell'], { defval: "" });
+    state.initiatives.lotIssues = XLSX.utils.sheet_to_json(workbook.Sheets['Lot Issue - Moved'], { defval: "" });
+    state.initiatives.shuttleIssues = XLSX.utils.sheet_to_json(workbook.Sheets['Shuttle Issue'], { defval: "" });
+    state.initiatives.editExtend = XLSX.utils.sheet_to_json(workbook.Sheets['Edit Extend'], { defval: "" });
+
+    // 2. Build Normalized Data Model (Now Async with Chunking)
+    await buildDataModel();
+
+    // 3. Render Dashboard
+    updateDashboard();
+
+    // 4. Diagnostics
+    renderDiagnostics();
+}
+
+// Helper function to process data in chunks to prevent freezing
+async function processInChunks(array, chunkSize, callback) {
+    for (let i = 0; i < array.length; i += chunkSize) {
+        const chunk = array.slice(i, i + chunkSize);
+        callback(chunk, i); // Pass chunk and index
+        
+        // Yield control back to the browser to render UI
+        if (i % (chunkSize * 5) === 0) { // Update UI every 5 chunks
+            document.getElementById('loadingText').innerText = `Processing Rows ${i} to ${i + chunkSize * 5}...`;
+            await new Promise(resolve => setTimeout(resolve, 0)); 
+        }
+    }
+}
+
+async function buildDataModel() {
+    state.normalized.ticketMap.clear();
+    
+    const getVertical = (row) => {
+        const v = row['Vertical'];
+        const sv = row['SubVertical'] || "";
+        if (v === 'General') return 'Airport Parking';
+        if (v === 'Parking') {
+            if (sv.toLowerCase().includes('airport')) return 'Airport Parking';
+            if (sv.toLowerCase().includes('city')) return 'City Parking';
+        }
+        return null;
+    };
+
+    const getMonthLabel = (dateObj) => {
+        if (!dateObj) return null;
+        const m = dateObj.toLocaleString('default', { month: 'short' });
+        const y = dateObj.getFullYear();
+        return `${m} ${y}`;
+    };
+
+    const classifyInteraction = (val) => {
+        if (!val) return 'Other';
+        const v = val.toString().toLowerCase();
+        if (v.includes('call')) return 'Call';
+        if (v.includes('chat')) return 'Chat';
+        if (v.includes('email')) return 'Email';
+        return 'Other';
+    };
+
+    const getOutcome = (row) => {
+        const action = (row['Action'] || "").toLowerCase();
+        const notes = (row['Notes'] || "").toLowerCase();
+        if (action.includes('cancel') || action.includes('refund') || notes.includes('cancel') || notes.includes('refund')) {
+            return 'Lost';
+        }
+        return 'Saved'; 
+    };
+
+    // PROCESS RAW SHEET using Chunking
+    await processInChunks(state.raw, 5000, (chunk) => {
+        chunk.forEach(row => {
+            const tid = row['Ticket ID'];
+            if (!tid) return;
+
+            const vertical = getVertical(row);
+            if (!vertical) return; 
+
+            const month = getMonthLabel(row['Ticket_created_date']);
+            if (!month || !CONFIG.months.includes(month)) return; 
+
+            if (!state.normalized.ticketMap.has(tid)) {
+                state.normalized.ticketMap.set(tid, {
+                    ticketId: tid,
+                    vertical: vertical,
+                    month: month,
+                    interactions: [],
+                    amount: 0,
+                    outcome: 'Unknown',
+                    lotName: row['Lot Name'] || 'Unknown',
+                    reason: row['Reason'] || '',
+                    subReason: row['Sub Reason'] || ''
+                });
+            }
+
+            const ticket = state.normalized.ticketMap.get(tid);
+            ticket.interactions.push({
+                type: classifyInteraction(row['Interaction']),
+                date: row['Ticket_created_date']
+            });
+
+            if (row['Amount'] && typeof row['Amount'] === 'number') {
+                ticket.amount = row['Amount'];
+            }
+
+            ticket.outcome = getOutcome(row);
+        });
+    });
+
+    // PROCESS INITIATIVE MEMBERSHIP
+    const markInitiativeMembers = (data, key) => {
+        const ids = new Set();
+        data.forEach(r => {
+            if(r['Ticket ID']) ids.add(r['Ticket ID']);
+        });
+        state.normalized.ticketMap.forEach((ticket, tid) => {
+            if (ids.has(tid)) {
+                ticket.initiatives = ticket.initiatives || [];
+                ticket.initiatives.push(key);
+            }
+        });
+    };
+
+    // These sheets are usually smaller, but we can process them normally or chunk them too if needed
+    markInitiativeMembers(state.initiatives.prebooking, 'prebooking');
+    markInitiativeMembers(state.initiatives.cancellations, 'cancellations');
+    markInitiativeMembers(state.initiatives.lotIssues, 'lotIssues');
+    markInitiativeMembers(state.initiatives.shuttleIssues, 'shuttleIssues');
+    markInitiativeMembers(state.initiatives.editExtend, 'editExtend');
+}
+
+function calculateMetrics(filterMonth, filterVertical, initiativeKey) {
+    let tickets = Array.from(state.normalized.ticketMap.values());
+
+    if (filterVertical !== 'All') {
+        tickets = tickets.filter(t => t.vertical === filterVertical);
+    }
+
+    if (filterMonth !== 'All') {
+        tickets = tickets.filter(t => t.month === filterMonth);
+    }
+
+    if (initiativeKey !== 'overview') {
+        tickets = tickets.filter(t => t.initiatives && t.initiatives.includes(initiativeKey));
+    }
+
+    let uniqueTickets = tickets.length; 
+    
+    let callUnique = new Set();
+    let chatUnique = new Set();
+    let emailUnique = new Set();
+    
+    let callInteractions = 0;
+    let chatInteractions = 0;
+    let emailInteractions = 0;
+
+    let revenueSaved = 0;
+    let revenueLost = 0;
+    let savedCustomers = 0;
+    let lostCustomers = 0;
+    let successfulTransfers = 0; 
+
+    const monthlyStats = {};
+    CONFIG.months.forEach(m => {
+        monthlyStats[m] = { tickets: 0, interactions: 0, saved: 0, lost: 0, revSaved: 0, revLost: 0 };
+    });
+
+    const lotStats = {};
+
+    tickets.forEach(t => {
+        const interactionTypes = new Set();
+        t.interactions.forEach(i => {
+            if (i.type === 'Call') {
+                callInteractions++;
+                callUnique.add(t.ticketId);
+            } else if (i.type === 'Chat') {
+                chatInteractions++;
+                chatUnique.add(t.ticketId);
+            } else if (i.type === 'Email') {
+                emailInteractions++;
+                emailUnique.add(t.ticketId);
+            }
+            interactionTypes.add(i.type);
+        });
+
+        if (monthlyStats[t.month]) {
+            monthlyStats[t.month].tickets++;
+            monthlyStats[t.month].interactions += t.interactions.length;
+            
+            let isSaved = false;
+            let isLost = false;
+
+            if (initiativeKey === 'cancellations') {
+                 isLost = (t.outcome === 'Lost');
+                 isSaved = !isLost; 
+                 if (isLost) revenueLost += t.amount;
+                 else revenueSaved += t.amount;
+
+            } else if (initiativeKey === 'prebooking') {
+                const note = (t.notes || "").toLowerCase();
+                const reason = (t.reason || "").toLowerCase();
+                if (note.includes('transfer') || reason.includes('successful')) {
+                    successfulTransfers++;
+                }
+            } else {
+                if (t.outcome === 'Lost') isLost = true;
+                else isSaved = true;
+
+                if (isLost) revenueLost += t.amount;
+                else revenueSaved += t.amount;
+            }
+
+            if (isSaved) {
+                savedCustomers++;
+                monthlyStats[t.month].saved++;
+                monthlyStats[t.month].revSaved += t.amount;
+            }
+            if (isLost) {
+                lostCustomers++;
+                monthlyStats[t.month].lost++;
+                monthlyStats[t.month].revLost += t.amount;
+            }
+        }
+
+        const lot = t.lotName;
+        if (!lotStats[lot]) lotStats[lot] = { count: 0, revSaved: 0, revLost: 0 };
+        lotStats[lot].count++;
+        lotStats[lot].revSaved += (t.outcome !== 'Lost' ? t.amount : 0);
+        lotStats[lot].revLost += (t.outcome === 'Lost' ? t.amount : 0);
+    });
+
+    return {
+        uniqueTickets,
+        callUnique: callUnique.size,
+        chatUnique: chatUnique.size,
+        emailUnique: emailUnique.size,
+        callInteractions,
+        chatInteractions,
+        emailInteractions,
+        totalInteractions: callInteractions + chatInteractions + emailInteractions,
+        savedCustomers,
+        lostCustomers,
+        revenueSaved,
+        revenueLost,
+        monthlyStats,
+        lotStats,
+        successfulTransfers
+    };
+}
+
+function renderKPIs(tab, m) {
+    const containerId = tab === 'overview' ? 'overview-kpis' : 'initiative-kpis';
+    const container = document.getElementById(containerId);
+    container.innerHTML = '';
+
+    const createCard = (title, value, sub = '', isGreen = null) => {
+        let colorClass = '';
+        if (isGreen === true) colorClass = 'text-green';
+        if (isGreen === false) colorClass = 'text-red';
+        
+        return `
+            <div class="kpi-card">
+                <div class="kpi-title">${title}</div>
+                <div class="kpi-value ${colorClass}">${value.toLocaleString()}</div>
+                <div class="kpi-sub">${sub}</div>
             </div>
+        `;
+    };
 
-            <div class="content-grid">
-                <div class="card">
-                    <h3>AI Insights</h3>
-                    <div id="initiative-insights"></div>
-                </div>
-                <div class="card">
-                    <h3>Projected Performance (Oct/Nov)</h3>
-                    <div id="initiative-projections"></div>
-                </div>
-            </div>
-        </section>
+    let html = createCard('Total Unique Tickets', m.uniqueTickets);
+    html += createCard('Call Unique Tickets', m.callUnique, `${m.callInteractions} Total Interactions`);
+    html += createCard('Chat Unique Tickets', m.chatUnique, `${m.chatInteractions} Total Interactions`);
+    html += createCard('Email Unique Tickets', m.emailUnique, `${m.emailInteractions} Total Interactions`);
 
-        <!-- Diagnostics -->
-        <div class="diagnostics-toggle" onclick="toggleDiagnostics()">Show Data Diagnostics</div>
-        <div class="diagnostics-panel" id="diagnosticsPanel"></div>
-    </main>
+    if (tab !== 'overview') {
+        html += createCard('Saved Customers', m.savedCustomers);
+        html += createCard('Lost/Refunded Customers', m.lostCustomers);
+        html += createCard('Revenue Saved', '$' + m.revenueSaved.toLocaleString(), '', true);
+        html += createCard('Revenue Lost', '$' + m.revenueLost.toLocaleString(), '', false);
+        
+        const total = m.savedCustomers + m.lostCustomers;
+        const rate = total > 0 ? ((m.savedCustomers / total) * 100).toFixed(1) + '%' : 'N/A';
+        html += createCard('Save/Recovery Rate', rate);
+    } else {
+         html += createCard('Total Qualifying Interactions', m.totalInteractions);
+    }
 
-    <!-- Link to your JS file at the bottom -->
-    <script src="assets/js/app.js"></script>
-</body>
-</html>
+    container.innerHTML = html;
+}
+
+function renderCharts(tab, metrics) {
+    const canvasId = tab === 'overview' ? 'overviewChart' : 'initiativeChart';
+    const ctx = document.getElementById(canvasId).getContext('2d');
+
+    if (state.charts[canvasId]) {
+        state.charts[canvasId].destroy();
+    }
+
+    const labels = CONFIG.months;
+    
+    // Calculate projections based on the last 3 months (June, July, August)
+    // to project Sept, Oct, Nov
+    const last3 = CONFIG.months.slice(-4, -1); // Gets June, July, August
+    
+    const avgTickets = last3.reduce((sum, m) => sum + (metrics.monthlyStats[m]?.tickets || 0), 0) / 3;
+    const avgSaved = last3.reduce((sum, m) => sum + (metrics.monthlyStats[m]?.saved || 0), 0) / 3;
+    
+    // Projections for Sept, Oct, Nov
+    const projSep = avgTickets * CONFIG.projectionFactors['Sep 2026'];
+    const projOct = avgTickets * CONFIG.projectionFactors['Oct 2026'];
+    const projNov = avgTickets * CONFIG.projectionFactors['Nov 2026'];
+
+    const projSavedSep = avgSaved * CONFIG.projectionFactors['Sep 2026'];
+    const projSavedOct = avgSaved * CONFIG.projectionFactors['Oct 2026'];
+    const projSavedNov = avgSaved * CONFIG.projectionFactors['Nov 2026'];
+
+    // Update chart labels to show projection for next 3 months
+    const chartLabels = [...labels, 'Sep 2026 (Proj)', 'Oct 2026 (Proj)', 'Nov 2026 (Proj)'];
+
+    let datasets = [];
+
+    if (tab === 'overview') {
+        const ticketData = labels.map(m => metrics.monthlyStats[m]?.tickets || 0);
+        const interactData = labels.map(m => metrics.monthlyStats[m]?.interactions || 0);
+        
+        datasets = [
+            {
+                label: 'Unique Tickets',
+                data: [...ticketData, projSep, projOct, projNov],
+                backgroundColor: 'rgba(0, 86, 179, 0.7)',
+                borderColor: 'rgba(0, 86, 179, 1)',
+                borderWidth: 1
+            },
+            {
+                label: 'Total Interactions',
+                data: [...interactData, projSep * 1.5, projOct * 1.5, projNov * 1.5], 
+                type: 'line',
+                borderColor: '#00a8cc',
+                tension: 0.3,
+                borderDash: [5, 5] 
+            }
+        ];
+        
+        // Make the line dashed only for the projection part (after index 8)
+        datasets[1].segment = {
+            borderDash: ctx => ctx.p0DataIndex >= 8 ? [6, 6] : undefined,
+        };
+
+    } else {
+        const savedData = labels.map(m => metrics.monthlyStats[m]?.saved || 0);
+        const lostData = labels.map(m => metrics.monthlyStats[m]?.lost || 0);
+
+        datasets = [
+            {
+                label: 'Saved Customers',
+                data: [...savedData, projSavedSep, projSavedOct, projSavedNov],
+                backgroundColor: 'rgba(40, 167, 69, 0.7)',
+                stack: 'Stack 0',
+            },
+            {
+                label: 'Lost Customers',
+                data: [...lostData, 0, 0, 0], // Don't project lost customers
+                backgroundColor: 'rgba(220, 53, 69, 0.7)',
+                stack: 'Stack 0',
+            }
+        ];
+    }
+
+    state.charts[canvasId] = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: chartLabels,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                }
+            },
+            scales: {
+                y: { beginAtZero: true }
+            }
+        }
+    });
+}
+
+function renderTopLots(tab, metrics) {
+    const container = document.getElementById('top-lots-table');
+    if(!container) return;
+
+    const lots = Object.entries(metrics.lotStats)
+        .map(([name, data]) => ({ name, ...data }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
+    if (lots.length === 0) {
+        container.innerHTML = '<p style="color:#666; font-style:italic;">No data available for current selection.</p>';
+        return;
+    }
+
+    let html = `<table>
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Parking Lot</th>
+                <th>Tickets</th>
+                <th>Rev Saved</th>
+                <th>Rev Lost</th>
+            </tr>
+        </thead>
+        <tbody>`;
+
+    lots.forEach((l, index) => {
+        html += `<tr>
+            <td class="rank-cell">#${index + 1}</td>
+            <td>${l.name}</td>
+            <td>${l.count}</td>
+            <td class="text-green">$${l.revSaved.toLocaleString()}</td>
+            <td class="text-red">$${l.revLost.toLocaleString()}</td>
+        </tr>`;
+    });
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+}
+
+function renderInsights(tab, metrics) {
+    const containerId = tab === 'overview' ? 'overview-insights' : 'initiative-insights';
+    const container = document.getElementById(containerId);
+    let insights = [];
+
+    if (metrics.uniqueTickets === 0) {
+        insights.push("No data available for the selected filters.");
+    } else {
+        const months = CONFIG.months;
+        const current = metrics.monthlyStats[months[months.length-1]]?.tickets || 0;
+        const prev = metrics.monthlyStats[months[months.length-2]]?.tickets || 0;
+        
+        if (prev > 0) {
+            const diff = ((current - prev) / prev) * 100;
+            const trend = diff > 0 ? 'increased' : 'decreased';
+            insights.push(`Volume ${trend} by ${Math.abs(diff).toFixed(1)}% from ${months[months.length-2]} to ${months[months.length-1]}.`);
+        }
+
+        const totalInter = metrics.callInteractions + metrics.chatInteractions + metrics.emailInteractions;
+        if (totalInter > 0) {
+            const topInter = Math.max(metrics.callInteractions, metrics.chatInteractions, metrics.emailInteractions);
+            let topName = metrics.callInteractions === topInter ? "Calls" : (metrics.chatInteractions === topInter ? "Chats" : "Emails");
+            insights.push(`<strong>${topName}</strong> represent the primary interaction channel for this period.`);
+        }
+
+        if (tab !== 'overview') {
+            const net = metrics.revenueSaved - metrics.revenueLost;
+            if (net > 0) insights.push(`Positive revenue impact of <strong>$${net.toLocaleString()}</strong>.`);
+            else insights.push(`Net revenue impact is negative ($${net.toLocaleString()}). Review loss reasons.`);
+        }
+    }
+
+    container.innerHTML = `<div class="insight-box">
+        ${insights.map(i => `<div class="insight-item">• ${i}</div>`).join('')}
+    </div>`;
+}
+
+function renderProjections(tab, metrics) {
+    const containerId = tab === 'overview' ? 'overview-projections' : 'initiative-projections';
+    const container = document.getElementById(containerId);
+    
+    // Use August as the base month for projections
+    const baseMonth = 'Aug 2026';
+    const val = metrics.monthlyStats[baseMonth];
+    
+    let html = `<p style="font-size:0.9rem; margin-bottom:5px;">Based on historical trends (Jan-Aug):</p>`;
+    
+    if (tab === 'overview') {
+        html += `<div><strong>Sep 2026:</strong> <span class="projection-badge">Proj</span> ${Math.round(val.tickets * 1.02).toLocaleString()} Tickets</div>`;
+        html += `<div style="margin-top:5px;"><strong>Oct 2026:</strong> <span class="projection-badge">Proj</span> ${Math.round(val.tickets * 1.05).toLocaleString()} Tickets</div>`;
+        html += `<div style="margin-top:5px;"><strong>Nov 2026:</strong> <span class="projection-badge">Proj</span> ${Math.round(val.tickets * 1.15).toLocaleString()} Tickets (Holiday Peak)</div>`;
+    } else {
+        html += `<div><strong>Sep 2026:</strong> <span class="projection-badge">Proj</span> ${Math.round(val.saved * 1.02).toLocaleString()} Saved Customers</div>`;
+        html += `<div style="margin-top:5px;"><strong>Oct 2026:</strong> <span class="projection-badge">Proj</span> ${Math.round(val.saved * 1.05).toLocaleString()} Saved Customers</div>`;
+        html += `<div style="margin-top:5px;"><strong>Nov 2026:</strong> <span class="projection-badge">Proj</span> ${Math.round(val.saved * 1.15).toLocaleString()} Saved Customers</div>`;
+    }
+
+    container.innerHTML = html;
+}
+
+function renderDiagnostics() {
+    const panel = document.getElementById('diagnosticsPanel');
+    let diag = `
+        RAW Records: ${state.raw.length}
+        Unique Tickets Parsed: ${state.normalized.ticketMap.size}
+        Prebooking Init Rows: ${state.initiatives.prebooking.length}
+        Cancellations Init Rows: ${state.initiatives.cancellations.length}
+        Lot Issue Init Rows: ${state.initiatives.lotIssues.length}
+        Shuttle Issue Init Rows: ${state.initiatives.shuttleIssues.length}
+        Edit Extend Init Rows: ${state.initiatives.editExtend.length}
+    `;
+    panel.innerText = diag;
+}
+
+function switchTab(tabId) {
+    state.currentTab = tabId;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`button[onclick="switchTab('${tabId}')"]`).classList.add('active');
+    document.querySelectorAll('.dashboard-section').forEach(s => s.classList.remove('active'));
+    
+    if (tabId === 'overview') {
+        document.getElementById('overview').classList.add('active');
+    } else {
+        const container = document.getElementById('initiative-container');
+        container.classList.add('active');
+        document.querySelector('#initiative-container h3').innerText = formatTitle(tabId) + " Performance";
+    }
+
+    updateDashboard();
+}
+
+function formatTitle(str) {
+    return str.replace(/([A-Z])/g, ' $1').trim();
+}
+
+function updateDashboard() {
+    if (state.raw.length === 0) return; 
+    const month = document.getElementById('monthFilter').value;
+    const vertical = document.getElementById('verticalFilter').value;
+    const tab = state.currentTab;
+    const metrics = calculateMetrics(month, vertical, tab);
+    renderKPIs(tab, metrics);
+    renderCharts(tab, metrics);
+    renderTopLots(tab, metrics);
+    renderInsights(tab, metrics);
+    renderProjections(tab, metrics);
+}
+
+function showLoading(show) {
+    document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
+    if(!show) {
+        document.getElementById('loadingText').innerText = "Processing Data...";
+    }
+}
+
+function toggleDiagnostics() {
+    const p = document.getElementById('diagnosticsPanel');
+    p.style.display = p.style.display === 'block' ? 'none' : 'block';
+}
+
+function showToast(msg, type) {
+    const el = document.getElementById('errorToast');
+    el.innerText = msg;
+    el.style.background = type === 'success' ? 'var(--success)' : 'var(--danger)';
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+function showError(msg) {
+    const el = document.getElementById('errorToast');
+    el.innerText = msg;
+    el.style.display = 'block';
+}
