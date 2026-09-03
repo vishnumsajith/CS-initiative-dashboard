@@ -9,42 +9,27 @@ const REQUIRED_SHEETS = [
 
 document.addEventListener("DOMContentLoaded", () => {
 
-    renderDashboard();
+    document.getElementById("dashboardContent").innerHTML = `
+        <div class="card-box">
+            <h3>Phase 2 Ready ✅</h3>
+            <p>Upload an Excel workbook for validation.</p>
+        </div>
+    `;
 
     document
         .getElementById("uploadBtn")
         .addEventListener("click", () => {
-
-            document
-                .getElementById("excelFile")
-                .click();
+            document.getElementById("excelFile").click();
         });
 
     document
         .getElementById("excelFile")
-        .addEventListener("change", handleWorkbookUpload);
+        .addEventListener("change", handleFileUpload);
 
+    console.log("Dashboard loaded");
 });
 
-function renderDashboard() {
-
-    document.getElementById("dashboardContent").innerHTML = `
-    
-    <div class="card-box">
-
-        <h3>Phase 2 Ready ✅</h3>
-
-        <p>
-            Upload an Airport Initiative workbook
-            to begin validation.
-        </p>
-
-    </div>
-
-    `;
-}
-
-function handleWorkbookUpload(event) {
+function handleFileUpload(event) {
 
     const file = event.target.files[0];
 
@@ -56,11 +41,10 @@ function handleWorkbookUpload(event) {
 
         try {
 
-            const data = e.target.result;
-
-            const workbook = XLSX.read(data, {
-                type: "array"
-            });
+            const workbook = XLSX.read(
+                e.target.result,
+                { type: "array" }
+            );
 
             validateWorkbook(workbook);
 
@@ -70,8 +54,8 @@ function handleWorkbookUpload(event) {
                 "We couldn't process this workbook. Please upload a valid Excel file."
             );
 
+            console.error(error);
         }
-
     };
 
     reader.readAsArrayBuffer(file);
@@ -79,20 +63,14 @@ function handleWorkbookUpload(event) {
 
 function validateWorkbook(workbook) {
 
-    const availableSheets = workbook.SheetNames;
-
     const missingSheets = REQUIRED_SHEETS.filter(
-        sheet => !availableSheets.includes(sheet)
+        sheet => !workbook.SheetNames.includes(sheet)
     );
 
     if (missingSheets.length > 0) {
 
         showError(
-
-            `The uploaded workbook is missing the "${missingSheets[0]}" sheet.
-
-Please upload the latest Airport Initiative workbook.`
-
+            `Missing sheet: ${missingSheets[0]}`
         );
 
         return;
@@ -105,37 +83,19 @@ Please upload the latest Airport Initiative workbook.`
         new Date().toLocaleString();
 
     document.getElementById("dashboardContent").innerHTML = `
-
         <div class="card-box">
-
             <h3>Workbook Validation Passed ✅</h3>
-
-            <p>
-                All required sheets were found.
-            </p>
-
-            <ul>
-                ${REQUIRED_SHEETS.map(s => `<li>${s}</li>`).join("")}
-            </ul>
-
+            <p>All required sheets found.</p>
         </div>
-
     `;
 }
 
 function showError(message) {
 
     document.getElementById("dashboardContent").innerHTML = `
-
         <div class="card-box">
-
-            <h3 style="color:red">
-                Validation Failed
-            </h3>
-
+            <h3 style="color:red">Validation Failed</h3>
             <p>${message}</p>
-
         </div>
-
     `;
 }
