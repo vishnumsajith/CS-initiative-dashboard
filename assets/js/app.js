@@ -728,3 +728,4 @@ function showError(msg) {
     const el = document.getElementById('errorToast');
     el.innerText = msg;
     el.style.display = 'block';
+}
