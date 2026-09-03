@@ -1,11 +1,15 @@
 // --- CONFIGURATION ---
 const CONFIG = {
+    // Added September as requested
     requiredSheets: ['Raw', 'Lot Issue - Moved', 'Shuttle Issue', 'Cancellation - Cross sell', 'Prebooking - Cross sell', 'Edit Extend'],
     interactionTypes: ['Call', 'Chat', 'Email'],
-    months: ['Jan 2026', 'Feb 2026', 'Mar 2026', 'Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026'],
+    months: ['Jan 2026', 'Feb 2026', 'Mar 2026', 'Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026', 'Sep 2026'],
+    
+    // Projecting for Sept, Oct, Nov based on previous months
     projectionFactors: {
-        'Oct 2026': 1.05, // Assumption: Halloween/Seasonality
-        'Nov 2026': 1.15  // Assumption: Thanksgiving Peak
+        'Sep 2026': 1.02, // Slight increase
+        'Oct 2026': 1.05, // Halloween/Seasonality
+        'Nov 2026': 1.15  // Thanksgiving Peak
     },
     verticalMap: {
         'Parking': {
@@ -43,13 +47,17 @@ function handleFileUpload(event) {
     showLoading(true);
     const reader = new FileReader();
     
-    reader.onload = function(e) {
+    reader.onload = async function(e) { // Added async to allow chunking
         try {
             const data = new Uint8Array(e.target.result);
+            
+            // Read workbook
             const workbook = XLSX.read(data, { type: 'array', cellDates: true });
             
             if (validateWorkbook(workbook)) {
-                processData(workbook);
+                // Use await here because processData is now async
+                await processData(workbook);
+                
                 document.getElementById('lastUpdated').innerText = `Last Updated: ${new Date().toLocaleTimeString()}`;
                 document.getElementById('dataStatus').innerText = "Data Loaded Successfully";
                 showToast("Data processed successfully!", "success");
@@ -75,7 +83,7 @@ function validateWorkbook(workbook) {
 }
 
 // --- DATA PROCESSING CORE ---
-function processData(workbook) {
+async function processData(workbook) {
     // 1. Parse Sheets to JSON
     state.raw = XLSX.utils.sheet_to_json(workbook.Sheets['Raw'], { defval: "" });
     state.initiatives.prebooking = XLSX.utils.sheet_to_json(workbook.Sheets['Prebooking - Cross sell'], { defval: "" });
@@ -84,8 +92,8 @@ function processData(workbook) {
     state.initiatives.shuttleIssues = XLSX.utils.sheet_to_json(workbook.Sheets['Shuttle Issue'], { defval: "" });
     state.initiatives.editExtend = XLSX.utils.sheet_to_json(workbook.Sheets['Edit Extend'], { defval: "" });
 
-    // 2. Build Normalized Data Model
-    buildDataModel();
+    // 2. Build Normalized Data Model (Now Async with Chunking)
+    await buildDataModel();
 
     // 3. Render Dashboard
     updateDashboard();
@@ -94,7 +102,21 @@ function processData(workbook) {
     renderDiagnostics();
 }
 
-function buildDataModel() {
+// Helper function to process data in chunks to prevent freezing
+async function processInChunks(array, chunkSize, callback) {
+    for (let i = 0; i < array.length; i += chunkSize) {
+        const chunk = array.slice(i, i + chunkSize);
+        callback(chunk, i); // Pass chunk and index
+        
+        // Yield control back to the browser to render UI
+        if (i % (chunkSize * 5) === 0) { // Update UI every 5 chunks
+            document.getElementById('loadingText').innerText = `Processing Rows ${i} to ${i + chunkSize * 5}...`;
+            await new Promise(resolve => setTimeout(resolve, 0)); 
+        }
+    }
+}
+
+async function buildDataModel() {
     state.normalized.ticketMap.clear();
     
     const getVertical = (row) => {
@@ -133,42 +155,44 @@ function buildDataModel() {
         return 'Saved'; 
     };
 
-    // PROCESS RAW SHEET
-    state.raw.forEach(row => {
-        const tid = row['Ticket ID'];
-        if (!tid) return;
+    // PROCESS RAW SHEET using Chunking
+    await processInChunks(state.raw, 5000, (chunk) => {
+        chunk.forEach(row => {
+            const tid = row['Ticket ID'];
+            if (!tid) return;
 
-        const vertical = getVertical(row);
-        if (!vertical) return; 
+            const vertical = getVertical(row);
+            if (!vertical) return; 
 
-        const month = getMonthLabel(row['Ticket_created_date']);
-        if (!month || !CONFIG.months.includes(month)) return; 
+            const month = getMonthLabel(row['Ticket_created_date']);
+            if (!month || !CONFIG.months.includes(month)) return; 
 
-        if (!state.normalized.ticketMap.has(tid)) {
-            state.normalized.ticketMap.set(tid, {
-                ticketId: tid,
-                vertical: vertical,
-                month: month,
-                interactions: [],
-                amount: 0,
-                outcome: 'Unknown',
-                lotName: row['Lot Name'] || 'Unknown',
-                reason: row['Reason'] || '',
-                subReason: row['Sub Reason'] || ''
+            if (!state.normalized.ticketMap.has(tid)) {
+                state.normalized.ticketMap.set(tid, {
+                    ticketId: tid,
+                    vertical: vertical,
+                    month: month,
+                    interactions: [],
+                    amount: 0,
+                    outcome: 'Unknown',
+                    lotName: row['Lot Name'] || 'Unknown',
+                    reason: row['Reason'] || '',
+                    subReason: row['Sub Reason'] || ''
+                });
+            }
+
+            const ticket = state.normalized.ticketMap.get(tid);
+            ticket.interactions.push({
+                type: classifyInteraction(row['Interaction']),
+                date: row['Ticket_created_date']
             });
-        }
 
-        const ticket = state.normalized.ticketMap.get(tid);
-        ticket.interactions.push({
-            type: classifyInteraction(row['Interaction']),
-            date: row['Ticket_created_date']
+            if (row['Amount'] && typeof row['Amount'] === 'number') {
+                ticket.amount = row['Amount'];
+            }
+
+            ticket.outcome = getOutcome(row);
         });
-
-        if (row['Amount'] && typeof row['Amount'] === 'number') {
-            ticket.amount = row['Amount'];
-        }
-
-        ticket.outcome = getOutcome(row);
     });
 
     // PROCESS INITIATIVE MEMBERSHIP
@@ -185,6 +209,7 @@ function buildDataModel() {
         });
     };
 
+    // These sheets are usually smaller, but we can process them normally or chunk them too if needed
     markInitiativeMembers(state.initiatives.prebooking, 'prebooking');
     markInitiativeMembers(state.initiatives.cancellations, 'cancellations');
     markInitiativeMembers(state.initiatives.lotIssues, 'lotIssues');
@@ -361,17 +386,24 @@ function renderCharts(tab, metrics) {
 
     const labels = CONFIG.months;
     
-    const last3 = CONFIG.months.slice(-3);
+    // Calculate projections based on the last 3 months (June, July, August)
+    // to project Sept, Oct, Nov
+    const last3 = CONFIG.months.slice(-4, -1); // Gets June, July, August
+    
     const avgTickets = last3.reduce((sum, m) => sum + (metrics.monthlyStats[m]?.tickets || 0), 0) / 3;
     const avgSaved = last3.reduce((sum, m) => sum + (metrics.monthlyStats[m]?.saved || 0), 0) / 3;
     
+    // Projections for Sept, Oct, Nov
+    const projSep = avgTickets * CONFIG.projectionFactors['Sep 2026'];
     const projOct = avgTickets * CONFIG.projectionFactors['Oct 2026'];
     const projNov = avgTickets * CONFIG.projectionFactors['Nov 2026'];
 
+    const projSavedSep = avgSaved * CONFIG.projectionFactors['Sep 2026'];
     const projSavedOct = avgSaved * CONFIG.projectionFactors['Oct 2026'];
     const projSavedNov = avgSaved * CONFIG.projectionFactors['Nov 2026'];
 
-    const chartLabels = [...labels, 'Oct 2026 (Proj)', 'Nov 2026 (Proj)'];
+    // Update chart labels to show projection for next 3 months
+    const chartLabels = [...labels, 'Sep 2026 (Proj)', 'Oct 2026 (Proj)', 'Nov 2026 (Proj)'];
 
     let datasets = [];
 
@@ -382,14 +414,14 @@ function renderCharts(tab, metrics) {
         datasets = [
             {
                 label: 'Unique Tickets',
-                data: [...ticketData, projOct, projNov],
+                data: [...ticketData, projSep, projOct, projNov],
                 backgroundColor: 'rgba(0, 86, 179, 0.7)',
                 borderColor: 'rgba(0, 86, 179, 1)',
                 borderWidth: 1
             },
             {
                 label: 'Total Interactions',
-                data: [...interactData, projOct * 1.5, projNov * 1.5], 
+                data: [...interactData, projSep * 1.5, projOct * 1.5, projNov * 1.5], 
                 type: 'line',
                 borderColor: '#00a8cc',
                 tension: 0.3,
@@ -397,6 +429,7 @@ function renderCharts(tab, metrics) {
             }
         ];
         
+        // Make the line dashed only for the projection part (after index 8)
         datasets[1].segment = {
             borderDash: ctx => ctx.p0DataIndex >= 8 ? [6, 6] : undefined,
         };
@@ -408,13 +441,13 @@ function renderCharts(tab, metrics) {
         datasets = [
             {
                 label: 'Saved Customers',
-                data: [...savedData, projSavedOct, projSavedNov],
+                data: [...savedData, projSavedSep, projSavedOct, projSavedNov],
                 backgroundColor: 'rgba(40, 167, 69, 0.7)',
                 stack: 'Stack 0',
             },
             {
                 label: 'Lost Customers',
-                data: [...lostData, 0, 0], 
+                data: [...lostData, 0, 0, 0], // Don't project lost customers
                 backgroundColor: 'rgba(220, 53, 69, 0.7)',
                 stack: 'Stack 0',
             }
@@ -524,16 +557,19 @@ function renderProjections(tab, metrics) {
     const containerId = tab === 'overview' ? 'overview-projections' : 'initiative-projections';
     const container = document.getElementById(containerId);
     
-    const lastMonth = 'Aug 2026';
-    const val = metrics.monthlyStats[lastMonth];
+    // Use August as the base month for projections
+    const baseMonth = 'Aug 2026';
+    const val = metrics.monthlyStats[baseMonth];
     
     let html = `<p style="font-size:0.9rem; margin-bottom:5px;">Based on historical trends (Jan-Aug):</p>`;
     
     if (tab === 'overview') {
-        html += `<div><strong>Oct 2026:</strong> <span class="projection-badge">Proj</span> ${Math.round(val.tickets * 1.05).toLocaleString()} Tickets</div>`;
+        html += `<div><strong>Sep 2026:</strong> <span class="projection-badge">Proj</span> ${Math.round(val.tickets * 1.02).toLocaleString()} Tickets</div>`;
+        html += `<div style="margin-top:5px;"><strong>Oct 2026:</strong> <span class="projection-badge">Proj</span> ${Math.round(val.tickets * 1.05).toLocaleString()} Tickets</div>`;
         html += `<div style="margin-top:5px;"><strong>Nov 2026:</strong> <span class="projection-badge">Proj</span> ${Math.round(val.tickets * 1.15).toLocaleString()} Tickets (Holiday Peak)</div>`;
     } else {
-        html += `<div><strong>Oct 2026:</strong> <span class="projection-badge">Proj</span> ${Math.round(val.saved * 1.05).toLocaleString()} Saved Customers</div>`;
+        html += `<div><strong>Sep 2026:</strong> <span class="projection-badge">Proj</span> ${Math.round(val.saved * 1.02).toLocaleString()} Saved Customers</div>`;
+        html += `<div style="margin-top:5px;"><strong>Oct 2026:</strong> <span class="projection-badge">Proj</span> ${Math.round(val.saved * 1.05).toLocaleString()} Saved Customers</div>`;
         html += `<div style="margin-top:5px;"><strong>Nov 2026:</strong> <span class="projection-badge">Proj</span> ${Math.round(val.saved * 1.15).toLocaleString()} Saved Customers</div>`;
     }
 
@@ -590,6 +626,9 @@ function updateDashboard() {
 
 function showLoading(show) {
     document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
+    if(!show) {
+        document.getElementById('loadingText').innerText = "Processing Data...";
+    }
 }
 
 function toggleDiagnostics() {
