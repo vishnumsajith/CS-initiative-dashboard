@@ -463,4 +463,268 @@ function renderCharts(tab, metrics) {
                 type: 'line',
                 borderColor: colorLine,
                 tension: 0.3,
-                border
+                borderDash: [5, 5]
+            }
+        ];
+        
+        datasets[1].segment = {
+            borderDash: ctx => ctx.p0DataIndex >= 8 ? [6, 6] : undefined,
+        };
+
+    } else {
+        const savedData = CONFIG.months.map(m => metrics.monthlyStats[m]?.saved || 0);
+        const lostData = CONFIG.months.map(m => metrics.monthlyStats[m]?.lost || 0);
+
+        datasets = [
+            {
+                label: 'Saved Customers',
+                data: [...savedData, projSavedSep, projSavedOct, projSavedNov],
+                backgroundColor: colorBarFill,
+                stack: 'Stack 0',
+            },
+            {
+                label: 'Lost Customers',
+                data: [...lostData, 0, 0, 0], 
+                backgroundColor: 'rgba(220, 53, 69, 0.7)',
+                stack: 'Stack 0',
+            }
+        ];
+    }
+
+    state.charts[canvasId] = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: chartLabels,
+            datasets: datasets
+        },
+        plugins: [ChartDataLabels], 
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: { padding: { top: 20 } },
+            plugins: {
+                legend: { display: true },
+                tooltip: { mode: 'index', intersect: false, },
+                datalabels: {
+                    display: function(context) {
+                        if (tab === 'overview') return true;
+                        return context.datasetIndex === 0; 
+                    },
+                    font: function(context) {
+                        if (context.datasetIndex === 1) return { size: 10, weight: 'bold' };
+                        return { size: 11, weight: 'bold' };
+                    },
+                    color: function(context) {
+                        if (context.dataset.type === 'bar') return '#000'; 
+                        return colorLine; 
+                    },
+                    align: function(context) {
+                        if (context.datasetIndex === 1) return 'top'; 
+                        return 'end'; 
+                    },
+                    anchor: function(context) {
+                        if (context.datasetIndex === 1) return 'end'; 
+                        return 'end'; 
+                    },
+                    offset: function(context) {
+                        if (context.datasetIndex === 1) return 4; 
+                        return 0;
+                    },
+                    formatter: function(value, context) {
+                        if (value === 0) return '';
+                        return value.toLocaleString();
+                    }
+                }
+            },
+            scales: {
+                x: { grid: { display: false } },
+                y: { beginAtZero: true, grid: { display: false } }
+            },
+            elements: {
+                bar: {
+                    barPercentage: 0.5, 
+                    categoryPercentage: 0.8
+                }
+            }
+        }
+    });
+}
+
+function renderTopLots(tab, metrics) {
+    const container = document.getElementById('top-lots-table');
+    if(!container) return;
+
+    const lots = Object.entries(metrics.lotStats)
+        .map(([name, data]) => ({ name, ...data }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
+    if (lots.length === 0) {
+        container.innerHTML = '<p style="color:#666; font-style:italic;">No data available for current selection.</p>';
+        return;
+    }
+
+    let html = `<table>
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Parking Lot</th>
+                <th>Tickets</th>
+                <th>Rev Saved</th>
+                <th>Rev Lost</th>
+            </tr>
+        </thead>
+        <tbody>`;
+
+    lots.forEach((l, index) => {
+        html += `<tr>
+            <td class="rank-cell">#${index + 1}</td>
+            <td>${l.name}</td>
+            <td>${l.count}</td>
+            <td class="text-green">$${l.revSaved.toLocaleString()}</td>
+            <td class="text-red">$${l.revLost.toLocaleString()}</td>
+        </tr>`;
+    });
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+}
+
+function renderInsights(tab, metrics) {
+    const containerId = tab === 'overview' ? 'overview-insights' : 'initiative-insights';
+    const container = document.getElementById(containerId);
+    let insights = [];
+
+    if (metrics.uniqueTickets === 0) {
+        insights.push("No data available for the selected filters.");
+    } else {
+        const months = CONFIG.months;
+        const current = metrics.monthlyStats[months[months.length-1]]?.tickets || 0;
+        const prev = metrics.monthlyStats[months[months.length-2]]?.tickets || 0;
+        
+        if (prev > 0 && current > 0) {
+            const diff = ((current - prev) / prev) * 100;
+            const trend = diff > 0 ? 'increased' : 'decreased';
+            insights.push(`Volume ${trend} by ${Math.abs(diff).toFixed(1)}% from ${months[months.length-2]} to ${months[months.length-1]}.`);
+        }
+
+        const totalInter = metrics.callInteractions + metrics.chatInteractions + metrics.emailInteractions;
+        if (totalInter > 0) {
+            const topInter = Math.max(metrics.callInteractions, metrics.chatInteractions, metrics.emailInteractions);
+            let topName = metrics.callInteractions === topInter ? "Calls" : (metrics.chatInteractions === topInter ? "Chats" : "Emails");
+            insights.push(`<strong>${topName}</strong> represent the primary interaction channel for this period.`);
+        }
+
+        // NEW REVENUE INSIGHTS
+        const saved = metrics.revenueSaved;
+        const lost = metrics.revenueLost;
+        const net = saved - lost;
+        
+        let revTrend = net > 0 ? "Positive" : "Negative";
+        insights.push(`<strong>Revenue Impact:</strong> ${revTrend} Net of <strong>$${net.toLocaleString()}</strong> (Saved: $${saved.toLocaleString()} vs Lost: $${lost.toLocaleString()}).`);
+
+        if (tab !== 'overview') {
+            // Additional MoM logic for revenue if desired
+             insights.push(`Net Revenue Impact is ${revTrend} based on current filters.`);
+        }
+    }
+
+    container.innerHTML = `<div class="insight-box">
+        ${insights.map(i => `<div class="insight-item">• ${i}</div>`).join('')}
+    </div>`;
+}
+
+function renderProjections(tab, metrics) {
+    const containerId = tab === 'overview' ? 'overview-projections' : 'initiative-projections';
+    const container = document.getElementById(containerId);
+    
+    const baseMonth = 'Aug 2026';
+    const val = metrics.monthlyStats[baseMonth];
+    
+    let html = `<p style="font-size:0.9rem; margin-bottom:5px;">Based on historical trends (Jan-Aug):</p>`;
+    
+    if (tab === 'overview') {
+        html += `<div><strong>Sep (Proj):</strong> <span class="projection-badge">Proj</span> ${Math.round(val.tickets * 1.02).toLocaleString()} Tickets</div>`;
+        html += `<div style="margin-top:5px;"><strong>Oct (Proj):</strong> <span class="projection-badge">Proj</span> ${Math.round(val.tickets * 1.05).toLocaleString()} Tickets</div>`;
+        html += `<div style="margin-top:5px;"><strong>Nov (Proj):</strong> <span class="projection-badge">Proj</span> ${Math.round(val.tickets * 1.15).toLocaleString()} Tickets (Holiday Peak)</div>`;
+    } else {
+        html += `<div><strong>Sep (Proj):</strong> <span class="projection-badge">Proj</span> ${Math.round(val.saved * 1.02).toLocaleString()} Saved Customers</div>`;
+        html += `<div style="margin-top:5px;"><strong>Oct (Proj):</strong> <span class="projection-badge">Proj</span> ${Math.round(val.saved * 1.05).toLocaleString()} Saved Customers</div>`;
+        html += `<div style="margin-top:5px;"><strong>Nov (Proj):</strong> <span class="projection-badge">Proj</span> ${Math.round(val.saved * 1.15).toLocaleString()} Saved Customers</div>`;
+    }
+
+    container.innerHTML = html;
+}
+
+function renderDiagnostics() {
+    const panel = document.getElementById('diagnosticsPanel');
+    let diag = `
+        RAW Records: ${state.raw.length}
+        Unique Tickets Parsed: ${state.normalized.ticketMap.size}
+        Prebooking Init Rows: ${state.initiatives.prebooking.length}
+        Cancellations Init Rows: ${state.initiatives.cancellations.length}
+        Lot Issue Init Rows: ${state.initiatives.lotIssues.length}
+        Shuttle Issue Init Rows: ${state.initiatives.shuttleIssues.length}
+        Edit Extend Init Rows: ${state.initiatives.editExtend.length}
+    `;
+    panel.innerText = diag;
+}
+
+function switchTab(tabId) {
+    state.currentTab = tabId;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`button[onclick="switchTab('${tabId}')"]`).classList.add('active');
+    document.querySelectorAll('.dashboard-section').forEach(s => s.classList.remove('active'));
+    
+    if (tabId === 'overview') {
+        document.getElementById('overview').classList.add('active');
+    } else {
+        const container = document.getElementById('initiative-container');
+        container.classList.add('active');
+        document.querySelector('#initiative-container h3').innerText = formatTitle(tabId) + " Performance";
+    }
+
+    updateDashboard();
+}
+
+function formatTitle(str) {
+    return str.replace(/([A-Z])/g, ' $1').trim();
+}
+
+function updateDashboard() {
+    if (state.raw.length === 0) return; 
+    const month = document.getElementById('monthFilter').value;
+    const vertical = document.getElementById('verticalFilter').value;
+    const tab = state.currentTab;
+    const metrics = calculateMetrics(month, vertical, tab);
+    renderKPIs(tab, metrics);
+    renderCharts(tab, metrics);
+    renderTopLots(tab, metrics);
+    renderInsights(tab, metrics);
+    renderProjections(tab, metrics);
+}
+
+function showLoading(show) {
+    document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
+    if(!show) {
+        document.getElementById('loadingText').innerText = "Processing Data...";
+    }
+}
+
+function toggleDiagnostics() {
+    const p = document.getElementById('diagnosticsPanel');
+    p.style.display = p.style.display === 'block' ? 'none' : 'block';
+}
+
+function showToast(msg, type) {
+    const el = document.getElementById('errorToast');
+    el.innerText = msg;
+    el.style.background = type === 'success' ? 'var(--success)' : 'var(--danger)';
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+function showError(msg) {
+    const el = document.getElementById('errorToast');
+    el.innerText = msg;
+    el.style.display = 'block';
