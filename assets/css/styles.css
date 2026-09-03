@@ -1,13 +1,13 @@
 body {
-    background: #f6f8fb;
-    font-family: Segoe UI, sans-serif;
+    background: #f5f7fa;
+    font-family: "Segoe UI", sans-serif;
+    padding: 20px;
 }
 
 .dashboard-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: 20px;
     margin-bottom: 20px;
 }
 
@@ -23,7 +23,7 @@ body {
 .status-bar {
     background: white;
     padding: 15px;
-    border-radius: 12px;
+    border-radius: 10px;
     margin-bottom: 20px;
     display: flex;
     justify-content: space-between;
@@ -32,22 +32,20 @@ body {
 .filter-panel {
     background: white;
     padding: 20px;
-    border-radius: 12px;
-    margin-bottom: 20px;
+    border-radius: 10px;
 }
 
 .kpi-grid {
     display: grid;
-    grid-template-columns:
-    repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fit,minmax(220px,1fr));
     gap: 15px;
-    margin-top: 20px;
 }
 
 .kpi-card {
     background: white;
-    border-radius: 14px;
+    border-radius: 12px;
     padding: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
 
 .kpi-title {
@@ -61,18 +59,12 @@ body {
 }
 
 .chart-placeholder,
+.table-placeholder,
 .insight-placeholder,
-.projection-placeholder,
-.table-placeholder {
-
+.projection-placeholder {
     background: white;
-    border-radius: 14px;
-    min-height: 300px;
-
-    padding: 20px;
+    padding: 25px;
+    border-radius: 12px;
     margin-top: 20px;
-}
-
-.dashboard-tabs {
-    margin-bottom: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
