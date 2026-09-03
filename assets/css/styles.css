@@ -1,70 +1,12 @@
-body {
-    background: #f5f7fa;
-    font-family: "Segoe UI", sans-serif;
-    padding: 20px;
+body{
+    background:#f5f7fa;
+    font-family:Segoe UI,sans-serif;
 }
 
-.dashboard-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-}
-
-.dashboard-title {
-    font-size: 2rem;
-    font-weight: 700;
-}
-
-.dashboard-subtitle {
-    color: #6c757d;
-}
-
-.status-bar {
-    background: white;
-    padding: 15px;
-    border-radius: 10px;
-    margin-bottom: 20px;
-    display: flex;
-    justify-content: space-between;
-}
-
-.filter-panel {
-    background: white;
-    padding: 20px;
-    border-radius: 10px;
-}
-
-.kpi-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit,minmax(220px,1fr));
-    gap: 15px;
-}
-
-.kpi-card {
-    background: white;
-    border-radius: 12px;
-    padding: 20px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-}
-
-.kpi-title {
-    color: #6c757d;
-    font-size: 14px;
-}
-
-.kpi-value {
-    font-size: 28px;
-    font-weight: 700;
-}
-
-.chart-placeholder,
-.table-placeholder,
-.insight-placeholder,
-.projection-placeholder {
-    background: white;
-    padding: 25px;
-    border-radius: 12px;
-    margin-top: 20px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+.card-box{
+    background:white;
+    padding:20px;
+    margin-top:20px;
+    border-radius:10px;
+    box-shadow:0 1px 5px rgba(0,0,0,.1);
 }
