@@ -1,0 +1,78 @@
+body {
+    background: #f6f8fb;
+    font-family: Segoe UI, sans-serif;
+}
+
+.dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 20px;
+    margin-bottom: 20px;
+}
+
+.dashboard-title {
+    font-size: 2rem;
+    font-weight: 700;
+}
+
+.dashboard-subtitle {
+    color: #6c757d;
+}
+
+.status-bar {
+    background: white;
+    padding: 15px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.filter-panel {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+.kpi-grid {
+    display: grid;
+    grid-template-columns:
+    repeat(auto-fit, minmax(220px, 1fr));
+    gap: 15px;
+    margin-top: 20px;
+}
+
+.kpi-card {
+    background: white;
+    border-radius: 14px;
+    padding: 20px;
+}
+
+.kpi-title {
+    color: #6c757d;
+    font-size: 14px;
+}
+
+.kpi-value {
+    font-size: 28px;
+    font-weight: 700;
+}
+
+.chart-placeholder,
+.insight-placeholder,
+.projection-placeholder,
+.table-placeholder {
+
+    background: white;
+    border-radius: 14px;
+    min-height: 300px;
+
+    padding: 20px;
+    margin-top: 20px;
+}
+
+.dashboard-tabs {
+    margin-bottom: 20px;
+}
